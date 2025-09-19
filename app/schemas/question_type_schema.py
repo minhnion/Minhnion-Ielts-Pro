@@ -1,31 +1,19 @@
 from pydantic import BaseModel
-from typing import List, Optional, Any
+from typing import List, Optional
+from app.schemas.practice_question import PracticeQuestionWithPassageSchema
 
-class ReadingPassageSchema(BaseModel):
-    id: int
-    title: Optional[str] = None
-    content: str
-    
-    class Config:
-        from_attributes = True
-
-class PracticeQuestionSchema(BaseModel):
-    id: int
-    question_text: str
-    options_data: Optional[Any] = None
-    explanation: Optional[str] = None
-
-    passage: ReadingPassageSchema 
-    class Config:
-        from_attributes = True
-
-class QuestionTypeDetailSchema(BaseModel):
+class QuestionTypeBase(BaseModel):
     id: int
     name: str
     slug: str
+
+    class Config:
+        from_attributes = True
+
+class QuestionTypeDetailSchema(QuestionTypeBase):
     description: Optional[str] = None
     strategy: Optional[str] = None
-    practice_questions: List[PracticeQuestionSchema] = []
+    practice_questions: List[PracticeQuestionWithPassageSchema] = []
 
     class Config:
         from_attributes = True
