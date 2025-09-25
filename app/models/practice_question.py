@@ -8,7 +8,7 @@ class PracticeQuestion(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     passage_id = Column(Integer, ForeignKey("reading_passages.id"), nullable=False)
-    passage = relationship("ReadingPassage", back_populates="questions")
+    passage = relationship("ReadingPassage", back_populates="practice_questions")
     
     question_text = Column(Text, nullable=False)
     options = Column(JSONB, nullable=True)  

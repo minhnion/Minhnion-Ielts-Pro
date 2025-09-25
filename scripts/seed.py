@@ -1,106 +1,113 @@
-# scripts/seed.py
 import sys
 import os
 import json
-from typing import List, Dict, Any
+import logging
+from pathlib import Path
 
-# Add project root to the Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import SessionLocal
-from app.models import question_type as qt_model
+from app.models.question_type import QuestionType
+from app.models.reading_passage import ReadingPassage
+from app.models.practice_question import PracticeQuestion
 from sqlalchemy.orm import Session
 
-# --- CONFIGURATION ---
-INPUT_DIR = os.path.join(os.path.dirname(__file__), 'seed_data_cleaned')
+INPUT_DIR = Path("scripts/seed_data_cleaned")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def seed_all_data():
+
+def seed_data(db: Session):
     """
-    Reads all cleaned JSON files and seeds the entire database in the correct order.
+    Hàm chính để đọc các file JSON với cấu trúc mới (practice_sets) 
+    và lưu dữ liệu vào cơ sở dữ liệu.
     """
-    db = SessionLocal()
+    logging.info(f"Bắt đầu quét dữ liệu từ thư mục: {INPUT_DIR}")
+    
+    json_files = list(INPUT_DIR.glob("*.json"))
+    if not json_files:
+        logging.warning(f"Không tìm thấy file JSON nào trong {INPUT_DIR}. Dừng lại.")
+        return
 
-    try:
-        # --- Step 1: Check if database is already seeded ---
-        if db.query(qt_model.QuestionType).count() > 0:
-            print("Database already contains data. To re-seed, please run 'alembic downgrade base' and 'alembic upgrade head' first.")
-            return
+    logging.info(f"Tìm thấy {len(json_files)} file JSON để xử lý.")
 
-        # --- Step 2: Find all cleaned JSON files ---
-        files_to_process = [f for f in os.listdir(INPUT_DIR) if f.endswith('_cleaned.json')]
-        if not files_to_process:
-            print(f"No cleaned JSON files found in {INPUT_DIR}. Did you run the parser?")
-            return
-            
-        print(f"Found {len(files_to_process)} cleaned files. Starting the seeding process...")
-
-        all_lessons_data = []
-        for filename in files_to_process:
-            filepath = os.path.join(INPUT_DIR, filename)
-            with open(filepath, 'r', encoding='utf-8') as f:
-                all_lessons_data.append(json.load(f))
-
-        # --- Step 3: Seed all QuestionType objects first ---
-        print("--> Seeding Question Types...")
-        question_type_objects = []
-        for lesson_data in all_lessons_data:
-            qt_obj = qt_model.QuestionType(
-                name=lesson_data['name'],
-                slug=lesson_data['slug'],
-                description=lesson_data['description'],
-                strategy=lesson_data['strategy']
-            )
-            question_type_objects.append(qt_obj)
+    for json_file in json_files:
+        logging.info(f"--- Đang xử lý file: {json_file.name} ---")
         
-        db.add_all(question_type_objects)
-        db.commit() # Commit to generate IDs
-        print(f"    Successfully seeded {len(question_type_objects)} QuestionType records.")
+        with open(json_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
 
-        # --- Step 4: Seed all PracticeQuestion objects and link them ---
-        print("--> Seeding Practice Questions...")
-        practice_question_objects = []
-        for lesson_data in all_lessons_data:
-            if not lesson_data['practice_questions']:
-                continue
-
-            # We need to fetch the parent QuestionType we just created to get its ID
-            parent_qt = db.query(qt_model.QuestionType).filter_by(slug=lesson_data['slug']).first()
-            if not parent_qt:
-                print(f"    Warning: Could not find parent QuestionType for slug '{lesson_data['slug']}'. Skipping its practice questions.")
-                continue
-
-            for pq_data in lesson_data['practice_questions']:
-                # Convert options dict to JSON string if it's a dict
-                options_json = json.dumps(pq_data.get('options')) if isinstance(pq_data.get('options'), dict) else None
-                
-                pq_obj = qt_model.PracticeQuestion(
-                    passage=pq_data['passage'],
-                    question_text=pq_data['question_text'],
-                    correct_answer=pq_data['correct_answer'],
-                    explanation=pq_data['explanation'],
-                    # options=options_json, # Uncomment this if you add an 'options' column of type JSON to your PracticeQuestion model
-                    question_type_id=parent_qt.id # This creates the link!
+        try:
+            # 1. XỬ LÝ QUESTION TYPE (CHUNG CHO CẢ FILE)
+            qt_data = data['question_type']
+            qt_slug = qt_data.get('slug') or qt_data['name'].lower().replace(' ', '-').replace('/', '-')
+            
+            question_type_obj = db.query(QuestionType).filter(QuestionType.slug == qt_slug).first()
+            
+            if not question_type_obj:
+                logging.info(f"Tạo mới QuestionType: '{qt_data['name']}'")
+                question_type_obj = QuestionType(
+                    name=qt_data['name'],
+                    slug=qt_slug,
+                    description=qt_data.get('description', ''),
+                    strategy=qt_data.get('strategy', '')
                 )
-                practice_question_objects.append(pq_obj)
-        
-        if practice_question_objects:
-            db.add_all(practice_question_objects)
-            db.commit()
-            print(f"    Successfully seeded {len(practice_question_objects)} PracticeQuestion records.")
-        else:
-            print("    No practice questions found to seed.")
-            
-        print("\nSeeding process completed successfully!")
+                db.add(question_type_obj)
+            else:
+                logging.info(f"Sử dụng QuestionType đã tồn tại: '{qt_data['name']}'")
+                # Cập nhật các trường nếu chúng đang trống
+                if not question_type_obj.description and qt_data.get('description'):
+                    question_type_obj.description = qt_data.get('description')
+                if not question_type_obj.strategy and qt_data.get('strategy'):
+                    question_type_obj.strategy = qt_data.get('strategy')
 
-    except Exception as e:
-        print(f"\nAn error occurred during seeding: {e}")
-        db.rollback() # Rollback any changes if an error occurs
+            if not data.get('practice_sets'):
+                 logging.warning(f"File {json_file.name} không có 'practice_sets'. Bỏ qua.")
+                 continue
+
+            for practice_set in data['practice_sets']:
+                # 2. XỬ LÝ READING PASSAGE (RIÊNG CHO TỪNG BỘ)
+                passage_title = practice_set['passage_title']
+                logging.info(f"Tạo ReadingPassage: '{passage_title}'")
+                passage_obj = ReadingPassage(
+                    title=passage_title,
+                    content=practice_set['passage_content']
+                )
+                db.add(passage_obj)
+
+                # 3. XỬ LÝ PRACTICE QUESTIONS (RIÊNG CHO TỪNG BỘ)
+                questions_data = practice_set.get('questions', [])
+                logging.info(f"Tạo {len(questions_data)} câu hỏi cho passage '{passage_title}'...")
+                for q_data in questions_data:
+                    # Logic xác định options: ưu tiên options trong câu hỏi, 
+                    # nếu không có thì lấy options chung của practice_set
+                    options_to_save = q_data.get('options') or practice_set.get('options') or {}
+                    
+                    new_question = PracticeQuestion(
+                        question_text=q_data['question_text'],
+                        correct_answer=q_data['correct_answer'],
+                        explanation=q_data.get('explanation', ''),
+                        options=options_to_save,
+                        # Liên kết với passage và question type tương ứng
+                        passage=passage_obj, 
+                        question_type=question_type_obj
+                    )
+                    db.add(new_question)
+
+            # 4. COMMIT GIAO DỊCH
+            db.commit()
+            logging.info(f"Lưu thành công dữ liệu từ file {json_file.name} vào DB.")
+
+        except Exception as e:
+            logging.error(f"LỖI khi xử lý file {json_file.name}: {e}. Đang rollback...")
+            db.rollback()
+
+
+if __name__ == "__main__":
+    logging.info("--- BẮT ĐẦU SCRIPT SEED DATA (PHIÊN BẢN MỚI) ---")
+    
+    db = SessionLocal()
+    try:
+        seed_data(db)
     finally:
         db.close()
-
-
-# --- MAIN EXECUTION ---
-if __name__ == "__main__":
-    print("=== Running Comprehensive Database Seeder ===")
-    seed_all_data()
-    print("==========================================")
+        logging.info("--- KẾT THÚC SCRIPT SEED DATA ---")

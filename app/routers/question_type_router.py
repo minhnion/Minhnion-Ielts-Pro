@@ -2,8 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.services.question_type_service import question_type_service
-from app.schemas.question_type_schema import QuestionTypeBase
-from app.schemas.question_type_schema import  QuestionTypeBase, QuestionTypeDetailSchema
+from app.schemas.question_type_schema import QuestionTypeBase, QuestionTypeDetailGroupedSchema
 from app.database import SessionLocal
 
 router = APIRouter(
@@ -22,6 +21,6 @@ def get_db():
 def read_all_question_types(db: Session = Depends(get_db)):
     return question_type_service.get_all(db=db)
 
-@router.get("/{slug}", response_model=QuestionTypeDetailSchema)
+@router.get("/{slug}", response_model=QuestionTypeDetailGroupedSchema)
 def read_question_type_details(slug: str, db: Session = Depends(get_db)):
     return question_type_service.get_by_slug(db=db, slug=slug)

@@ -1,6 +1,8 @@
 from pydantic import BaseModel
 from typing import List, Optional
-from app.schemas.practice_question import PracticeQuestionWithPassageSchema
+
+from app.schemas.practice_question_schema import PracticeQuestionSchema
+from app.schemas.reading_passage_schema import ReadingPassageSchema
 
 class QuestionTypeBase(BaseModel):
     id: int
@@ -10,10 +12,17 @@ class QuestionTypeBase(BaseModel):
     class Config:
         from_attributes = True
 
-class QuestionTypeDetailSchema(QuestionTypeBase):
+class PracticeSetGroupedSchema(BaseModel):
+    passage: ReadingPassageSchema
+    questions: List[PracticeQuestionSchema]
+
+    class Config:
+        from_attributes = True
+
+class QuestionTypeDetailGroupedSchema(QuestionTypeBase):
     description: Optional[str] = None
     strategy: Optional[str] = None
-    practice_questions: List[PracticeQuestionWithPassageSchema] = []
+    practice_sets: List[PracticeSetGroupedSchema] = []
 
     class Config:
         from_attributes = True
